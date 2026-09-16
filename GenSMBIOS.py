@@ -282,36 +282,37 @@ class Smbios:
     def _get_smbios(self, macserial, smbios_type, times=1):
         # Returns a list of SMBIOS lines that match
         total = []
-        # Get any additional args and ensure they're a string
         args = self.settings.get("macserial_args")
-        if not isinstance(args,basestring): args = ""
-        while len(total) < times:
-            total_len = len(total)
-            smbios, err, code = self.r.run({"args":[macserial,"-a"]+shlex.split(args)})
+        if not isinstance(args, basestring): args = ""
+        
+        # 将 -n times 传给 macserial，让二进制程序一次性生成指定数量的独立序列号
+        # 如果 macserial 已经支持 -n 参数，可直接调用；为了兼容性，也可以在循环中传入 -n 1 并配合随机种子
+        cmd = [macserial, "-a", "-n", str(times)] + shlex.split(args)
+        smbios, err, code = self.r.run({"args": cmd})
+        
+        if code != 0 or not smbios:
+            # 如果 macserial 不支持 -n 参数，降级回单条生成模式
+            cmd = [macserial, "-a"] + shlex.split(args)
+            smbios, err, code = self.r.run({"args": cmd})
             if code != 0:
-                # Issues generating
                 return None
-            # Got our text, let's see if the SMBIOS exists
-            for line in smbios.split("\n"):
-                line = line.strip()
-                if line.lower().startswith(smbios_type.lower()):
-                    total.append(line)
-                    if len(total) >= times:
-                        break
-            if total_len == len(total):
-                # Total didn't change - return False
-                return False
-        # Have a list now - let's format it
-        output = []
-        for sm in total:
-            s_list = [x.strip() for x in sm.split("|")]
-            # Add a uuid
-            s_list.append(str(uuid.uuid4()).upper())
-            # Generate a ROM value
-            s_list.append(self._get_rom())
-            # Format the text
-            output.append(s_list)
-        return output
+
+        # 解析符合指定机型的序列号
+        for line in smbios.split("\n"):
+            line = line.strip()
+            if line.lower().startswith(smbios_type.lower()):
+                s_list = [x.strip() for x in line.split("|")]
+                # 动态生成独立的 UUID 和 ROM，确保即使序列号一致，UUID/ROM 也不重复
+                s_list.append(str(uuid.uuid4()).upper())
+                s_list.append(self._get_rom())
+                total.append(s_list)
+                if len(total) >= times:
+                    break
+
+        if not total:
+            return False
+
+        return total
 
     def _generate_smbios(self, macserial):
         if not macserial or not os.path.exists(macserial):
@@ -333,7 +334,7 @@ class Smbios:
         print("Q. Quit")
         print("")
         print("Please type the SMBIOS to gen and the number")
-        menu = self.u.grab("of times to generate [max 20] (i.e. iMac18,3 5):  ")
+        menu = self.u.grab("of times to generate [max 100] (i.e. iMac18,3 5):  ")
         if menu.lower() == "q":
             self.u.custom_quit()
         elif menu.lower() == "m":
@@ -355,11 +356,11 @@ class Smbios:
                 self.u.grab("Press [enter] to return...")
                 self._generate_smbios(macserial)
                 return
-        # Keep it between 1 and 20
+        # Keep it between 1 and 100
         if times < 1:
             times = 1
-        if times > 20:
-            times = 20
+        if times > 100:
+            times = 100
         smbios = self._get_smbios(macserial,smtype,times)
         if smbios is None:
             # Issues generating
@@ -378,7 +379,16 @@ class Smbios:
             print("")
         f_string = "Type:         {}\nSerial:       {}\nBoard Serial: {}\nSmUUID:       {}"
         if self.gen_rom: f_string += "\nApple ROM:    {}" if self.rom_prefixes else "\nRandom ROM:   {}"
-        print("\n\n".join([f_string.format(*x) for x in smbios]))
+        # Save to result.txt
+        output_string = "\n\n".join([f_string.format(*x) for x in smbios])
+        try:
+            with open("result.txt", "w") as f:
+                f.write(output_string)
+            print("Saved generated SMBIOS to result.txt")
+        except Exception as e:
+            print("Failed to save result.txt: {}".format(e))
+        
+        print(output_string)
         if self.plist_data and self.plist and os.path.exists(self.plist):
             # Let's apply - got a valid file, and plist data
             if len(smbios) > 1:
