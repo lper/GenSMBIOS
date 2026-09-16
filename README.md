@@ -18,4 +18,4 @@ Then run with either `./GenSMBIOS.command` or by double-clicking *GenSMBIOS.comm
 ## Thanks to:
 
 * acidanthera and crew for the [macserial](https://github.com/acidanthera/macserial) application
-* [GenSMBIOS]https://github.com/corpnewt/GenSMBIOS
+* [GenSMBIOS](https://github.com/corpnewt/GenSMBIOS)
